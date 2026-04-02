@@ -1,5 +1,7 @@
 # Llama Swap App
 
+<img width="252" height="72" alt="Screenshot 2026-04-02 at 5 29 38 PM" src="https://github.com/user-attachments/assets/b0d573d7-0a08-42b7-b838-4ddcaf57089c" />
+
 A native macOS app that launches [llama-swap](https://github.com/mostlygeek/llama-swap) and displays its web UI in a WebKit window.
 
 ## What It Does
