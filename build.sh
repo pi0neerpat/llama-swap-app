@@ -3,7 +3,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP="$HOME/Applications/Llama Swap.app"
-ICON_SRC="$SCRIPT_DIR/../llama-swap-icon.png"
+ICON_SRC="$SCRIPT_DIR/llama-swap-icon.png"
 
 # Create .app bundle structure
 mkdir -p "$APP/Contents/MacOS"

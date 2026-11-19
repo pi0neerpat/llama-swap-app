@@ -10,11 +10,13 @@ After a model becomes ready, the app remembers the most recently ready local mod
 
 ## What It Does
 
-1. Starts `llama-swap` as a background process (`--config ~/.llama-swap/config.yaml --listen localhost:8080`)
+1. Starts `llama-swap` as a background process (`--config ~/.llama-swap/config.yaml --listen localhost:8080 --watch-config`)
 2. Opens a window that shows startup progress while it waits for the server (up to 10 seconds)
 3. Displays the llama-swap output and an actionable error if startup or page loading fails
 4. Loads the web UI at `http://localhost:8080` once the server responds
 5. Keeps llama-swap running when the window closes and terminates it when the app quits
+
+Open **Settings → Edit Models & Config** to edit `~/.llama-swap/config.yaml` directly in the app. Saving the file writes it atomically and llama-swap reloads it automatically because the app starts llama-swap with `--watch-config`.
 
 The status and output panel collapses when the web UI loads successfully. Use **Show Details** to reopen it, or **Retry** after correcting a startup issue or if the web UI fails to load.
 

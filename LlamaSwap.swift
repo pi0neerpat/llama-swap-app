@@ -25,6 +25,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
     private var retryButton: NSButton!
     private var detailsButton: NSButton!
     private var detailsExpanded = true
+    private var configWindow: NSWindow!
+    private var configTextView: NSTextView!
+    private var configPath: URL {
+        URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".llama-swap/config.yaml")
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupStatusItem()
@@ -40,6 +45,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
             button.image?.isTemplate = true
         }
 
+        let mainMenu = NSMenu()
+        let editMenuItem = NSMenuItem()
+        let editMenu = NSMenu(title: "Edit")
+
+        editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+
+        editMenuItem.submenu = editMenu
+        mainMenu.addItem(editMenuItem)
+        NSApp.mainMenu = mainMenu
+
         let menu = NSMenu()
         menu.delegate = self
         let openItem = NSMenuItem(title: "Open Llama Swap", action: #selector(openWindow), keyEquivalent: "o")
@@ -51,6 +69,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
         startAtLoginItem = NSMenuItem(title: "Start at Login", action: #selector(toggleStartAtLogin), keyEquivalent: "")
         startAtLoginItem.target = self
         settingsMenu.addItem(startAtLoginItem)
+        let editConfigItem = NSMenuItem(title: "Edit Models & Config", action: #selector(openConfigEditor), keyEquivalent: ",")
+        editConfigItem.target = self
+        settingsMenu.addItem(editConfigItem)
         settingsItem.submenu = settingsMenu
         menu.addItem(settingsItem)
 
@@ -85,6 +106,155 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
     private var loginItemIsEnabled: Bool {
         let status = SMAppService.mainApp.status
         return status == .enabled || status == .requiresApproval
+    }
+
+    @objc private func openConfigEditor() {
+        if configWindow == nil {
+            prepareConfigEditor()
+        }
+
+        loadConfig()
+        NSApp.setActivationPolicy(.regular)
+        configWindow.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func prepareConfigEditor() {
+        let textView = NSTextView(frame: NSRect(x: 0, y: 0, width: 760, height: 520))
+        textView.isEditable = true
+        textView.isSelectable = true
+        textView.drawsBackground = true
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.autoresizingMask = [.width]
+        textView.textContainer?.widthTracksTextView = true
+        textView.textContainer?.containerSize = NSSize(width: 760, height: CGFloat.greatestFiniteMagnitude)
+        textView.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        textView.textContainerInset = NSSize(width: 10, height: 10)
+        textView.isRichText = false
+        textView.importsGraphics = false
+        textView.allowsUndo = true
+        configTextView = textView
+
+        let scrollView = NSScrollView(frame: .zero)
+        scrollView.hasVerticalScroller = true
+        scrollView.documentView = textView
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+
+        let pathLabel = NSTextField(labelWithString: configPath.path)
+        pathLabel.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
+        pathLabel.textColor = .secondaryLabelColor
+        pathLabel.lineBreakMode = .byTruncatingMiddle
+
+        let revealButton = NSButton(title: "Reveal in Finder", target: self, action: #selector(revealConfig))
+        revealButton.bezelStyle = .rounded
+
+        let revertButton = NSButton(title: "Revert", target: self, action: #selector(revertConfig))
+        revertButton.bezelStyle = .rounded
+
+        let saveButton = NSButton(title: "Save", target: self, action: #selector(saveConfig))
+        saveButton.bezelStyle = .rounded
+        saveButton.keyEquivalent = "\r"
+
+        let pathRow = NSStackView(views: [pathLabel, revealButton])
+        pathRow.orientation = .horizontal
+        pathRow.alignment = .centerY
+        pathRow.distribution = .fill
+
+        let buttonRow = NSStackView(views: [revertButton, saveButton])
+        buttonRow.orientation = .horizontal
+        buttonRow.alignment = .centerY
+        buttonRow.spacing = 8
+
+        let content = NSStackView(views: [pathRow, scrollView, buttonRow])
+        content.orientation = .vertical
+        content.alignment = .leading
+        content.distribution = .fill
+        content.spacing = 10
+        content.edgeInsets = NSEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
+        content.translatesAutoresizingMaskIntoConstraints = false
+
+        let rootView = NSView()
+        rootView.addSubview(content)
+        NSLayoutConstraint.activate([
+            content.topAnchor.constraint(equalTo: rootView.topAnchor),
+            content.leadingAnchor.constraint(equalTo: rootView.leadingAnchor),
+            content.trailingAnchor.constraint(equalTo: rootView.trailingAnchor),
+            content.bottomAnchor.constraint(equalTo: rootView.bottomAnchor),
+            pathRow.widthAnchor.constraint(equalTo: content.widthAnchor),
+            pathLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 560),
+            scrollView.widthAnchor.constraint(equalTo: content.widthAnchor),
+            scrollView.heightAnchor.constraint(equalToConstant: 520),
+            buttonRow.trailingAnchor.constraint(equalTo: content.trailingAnchor)
+        ])
+
+        configWindow = NSWindow(
+            contentRect: NSMakeRect(0, 0, 760, 580),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        configWindow.title = "Models & llama-swap Config"
+        configWindow.contentView = rootView
+        configWindow.minSize = NSSize(width: 600, height: 400)
+        configWindow.center()
+    }
+
+    private func loadConfig() {
+        do {
+            configTextView.string = try String(contentsOf: configPath, encoding: .utf8)
+        } catch {
+            if (error as NSError).code == NSFileReadNoSuchFileError {
+                configTextView.string = """
+models:
+  # example-model:
+  #   cmd: >-
+  #     "/opt/homebrew/bin/llama-server" --host 0.0.0.0 --port ${PORT} --model "/absolute/path/to/model.gguf"
+"""
+            } else {
+                showConfigAlert(
+                    title: "Could Not Read Config",
+                    message: error.localizedDescription
+                )
+            }
+        }
+    }
+
+    @objc private func revertConfig() {
+        loadConfig()
+        configWindow.title = "Models & llama-swap Config"
+    }
+
+    @objc private func saveConfig() {
+        do {
+            try FileManager.default.createDirectory(
+                at: configPath.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try configTextView.string.write(to: configPath, atomically: true, encoding: .utf8)
+            configWindow.title = "Models & llama-swap Config - Saved"
+            appendServerLog("Saved llama-swap config: \(configPath.path)\n")
+            appendServerLog("llama-swap will reload the config when --watch-config detects the change.\n")
+        } catch {
+            showConfigAlert(
+                title: "Could Not Save Config",
+                message: error.localizedDescription
+            )
+        }
+    }
+
+    @objc private func revealConfig() {
+        NSWorkspace.shared.selectFile(
+            configPath.path,
+            inFileViewerRootedAtPath: configPath.deletingLastPathComponent().path
+        )
+    }
+
+    private func showConfigAlert(title: String, message: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.runModal()
     }
 
     @objc private func openWindow() {
@@ -247,15 +417,39 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
 
     func startServer() {
         startupAttemptID = UUID()
+        let startupID = startupAttemptID
         startupDeadline = Date().addingTimeInterval(10)
         webView.isHidden = true
         serverLog = ""
         updateLog()
         setStatus("Starting llama-swap…", detail: "Launching the local server.", isError: false)
 
+        var request = URLRequest(url: URL(string: "http://localhost:8080")!)
+        request.timeoutInterval = 1
+        URLSession.shared.dataTask(with: request) { [weak self] _, response, _ in
+            DispatchQueue.main.async {
+                guard let self, startupID == self.startupAttemptID else { return }
+                if let response = response as? HTTPURLResponse, response.statusCode > 0 {
+                    self.serverProcess = nil
+                    self.setStatus("llama-swap is ready", detail: "Loading the web UI at http://localhost:8080", isError: false)
+                    self.webView.isHidden = false
+                    self.webView.load(URLRequest(url: URL(string: "http://localhost:8080")!))
+                    self.preloadRecentModel()
+                    return
+                }
+                self.launchServerProcess(startupID: startupID)
+            }
+        }.resume()
+    }
+
+    private func launchServerProcess(startupID: UUID) {
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/opt/homebrew/bin/llama-swap")
-        task.arguments = ["--config", NSHomeDirectory() + "/.llama-swap/config.yaml", "--listen", "localhost:8080"]
+        task.arguments = [
+            "--config", configPath.path,
+            "--listen", "localhost:8080",
+            "--watch-config"
+        ]
 
         let stdoutPipe = Pipe()
         let stderrPipe = Pipe()
@@ -265,8 +459,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
         stdoutDrained = false
         stderrDrained = false
         serverExitStatus = nil
-        configureOutputPipe(stdoutPipe, stream: "stdout", generation: startupAttemptID)
-        configureOutputPipe(stderrPipe, stream: "stderr", generation: startupAttemptID)
+        configureOutputPipe(stdoutPipe, stream: "stdout", generation: startupID)
+        configureOutputPipe(stderrPipe, stream: "stderr", generation: startupID)
 
         task.terminationHandler = { [weak self] process in
             DispatchQueue.main.async {
@@ -279,7 +473,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
         do {
             try task.run()
             serverProcess = task
-            pollServer(attempt: 1, startupID: startupAttemptID)
+            pollServer(attempt: 1, startupID: startupID)
         } catch {
             stdoutPipe.fileHandleForReading.readabilityHandler = nil
             stderrPipe.fileHandleForReading.readabilityHandler = nil
@@ -328,9 +522,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
 
     private func pollServer(attempt: Int, startupID: UUID) {
         guard startupID == startupAttemptID else { return }
-        guard let process = serverProcess, process.isRunning else {
-            return
-        }
         guard Date() < startupDeadline else {
             setStatus("llama-swap did not become ready", detail: "No response from localhost:8080 within 10 seconds. Check the output below, then retry.", isError: true)
             retryButton.isHidden = false
@@ -351,12 +542,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
 
                 guard Date() < self.startupDeadline else {
                     self.setStatus("llama-swap did not become ready", detail: "No response from localhost:8080 within 10 seconds. Check the output below, then retry.", isError: true)
-                    self.retryButton.isHidden = false
-                    return
-                }
-
-                guard process.isRunning else {
-                    self.setStatus("llama-swap exited during startup", detail: "Check the server output below.", isError: true)
                     self.retryButton.isHidden = false
                     return
                 }
